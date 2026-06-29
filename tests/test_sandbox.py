@@ -76,7 +76,7 @@ class TestDockerSandboxIntegration:
             ls_result = sandbox.ls("/workspace")
             assert ls_result.entries is not None
             paths = [e["path"] for e in ls_result.entries]
-            assert "test.txt" in paths
+            assert any(p.endswith("/test.txt") for p in paths)
 
             # 6. Edit file (find and replace)
             edit_result = sandbox.edit("/workspace/test.txt", "Hello", "你好")
@@ -88,3 +88,35 @@ class TestDockerSandboxIntegration:
             result = sandbox.execute("sleep 10", timeout=2)
             assert "timed out" in result.output.lower()
             assert result.exit_code == 124
+
+    def test_upload_and_download_files(self):
+        """upload_files writes bytes, download_files reads them back."""
+        from langchain_docker_backend import DockerSandbox
+
+        with DockerSandbox(image="ghcr.io/astral-sh/uv:python3.13-bookworm-slim") as sandbox:
+            # Upload multiple files
+            files = [
+                ("/workspace/a.txt", b"alpha"),
+                ("/workspace/b.txt", b"beta"),
+            ]
+            upload_results = sandbox.upload_files(files)
+            assert len(upload_results) == 2
+            for r in upload_results:
+                assert r.error is None
+
+            # Download them back
+            download_results = sandbox.download_files(["/workspace/a.txt", "/workspace/b.txt"])
+            assert len(download_results) == 2
+            contents = {r.path: r.content for r in download_results}
+            assert contents["/workspace/a.txt"] == b"alpha"
+            assert contents["/workspace/b.txt"] == b"beta"
+
+    def test_download_nonexistent_file(self):
+        """download_files returns error for missing files."""
+        from langchain_docker_backend import DockerSandbox
+
+        with DockerSandbox(image="ghcr.io/astral-sh/uv:python3.13-bookworm-slim") as sandbox:
+            results = sandbox.download_files(["/workspace/nope.txt"])
+            assert len(results) == 1
+            assert results[0].content is None
+            assert results[0].error == "file_not_found"
