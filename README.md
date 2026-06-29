@@ -16,6 +16,92 @@ docker pull ghcr.io/astral-sh/uv:python3.13-bookworm-slim
 
 > **💡 Any Docker image works.** `ghcr.io/astral-sh/uv:python3.13-bookworm-slim` is just the default. You can use any image — `python:3.13-slim`, `ubuntu:22.04`, `node:20`, or your own custom image. Pass it via `image=` to match your runtime needs.
 
+## Connecting to Docker
+
+`DockerSandbox` connects to Docker via `docker.from_env()`. By default it reads the `DOCKER_HOST` environment variable, falling back to the local Unix socket (`/var/run/docker.sock`).
+
+### Local Docker (default)
+
+The most common setup — your code runs on the host and connects to the local Docker daemon. No extra configuration needed:
+
+```python
+sandbox = DockerSandbox()  # connects to /var/run/docker.sock
+```
+
+### Docker-in-Docker
+
+When running the library itself inside a container, there are two approaches:
+
+**Approach 1 — Socket mount (Docker outside of Docker)**
+
+Mount the host's Docker socket into the container. The container shares the host's Docker daemon — simpler and more lightweight:
+
+```bash
+docker run -v /var/run/docker.sock:/var/run/docker.sock your-image
+```
+
+```python
+# Inside the container — works the same way
+sandbox = DockerSandbox()
+```
+
+> **Note:** This gives the container access to the host's Docker daemon. Make sure the security implications are acceptable for your use case.
+
+**Approach 2 — True Docker-in-Docker (DinD)**
+
+Run a full Docker daemon inside the container using the `docker:dind` image. Completely isolated from the host's Docker, but requires `--privileged`:
+
+```bash
+docker run --privileged docker:dind
+```
+
+```python
+# Inside the DinD container — point to the inner daemon
+sandbox = DockerSandbox(
+    docker_client_kwargs={"base_url": "unix:///var/run/docker.sock"}
+)
+```
+
+> **Note:** `--privileged` grants the container extended Linux capabilities. Prefer the socket mount approach unless you need full isolation between the inner and outer Docker daemons.
+
+### Remote Docker
+
+Connect to a Docker daemon on another machine via TCP.
+
+**Option 1: Environment variable** (recommended)
+
+```bash
+export DOCKER_HOST=tcp://192.168.1.100:2375
+```
+
+```python
+sandbox = DockerSandbox()  # reads DOCKER_HOST automatically
+```
+
+**Option 2: Explicit `docker_client_kwargs`**
+
+```python
+sandbox = DockerSandbox(
+    docker_client_kwargs={"base_url": "tcp://192.168.1.100:2375"}
+)
+```
+
+**With TLS:**
+
+```python
+import docker.tls
+
+sandbox = DockerSandbox(
+    docker_client_kwargs={
+        "base_url": "tcp://192.168.1.100:2376",
+        "tls": docker.tls.TLSConfig(
+            ca_cert="/path/to/ca.pem",
+            client_cert=("/path/to/cert.pem", "/path/to/key.pem"),
+        ),
+    }
+)
+```
+
 ## Usage
 
 ### deepagents
@@ -138,6 +224,7 @@ The exception is `upload_files` and `download_files`. These remain **developer-o
 | `auto_remove` | `bool` | `True` | Remove container on close |
 | `execute_timeout` | `int` | `120` | Default timeout in seconds |
 | `max_output_bytes` | `int` | `512000` | Max output bytes before truncation |
+| `docker_client_kwargs` | `dict \| None` | `None` | Extra keyword arguments for `docker.from_env()` (e.g. `base_url`, `tls`) |
 
 ### Key Methods
 

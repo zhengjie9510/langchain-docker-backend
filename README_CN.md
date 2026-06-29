@@ -16,6 +16,92 @@ docker pull ghcr.io/astral-sh/uv:python3.13-bookworm-slim
 
 > **💡 任意 Docker 镜像均可使用。** `ghcr.io/astral-sh/uv:python3.13-bookworm-slim` 只是默认值。你可以用任何镜像 —— `python:3.13-slim`、`ubuntu:22.04`、`node:20`，或者你自己的定制镜像。通过 `image=` 参数传入即可，自由匹配你的运行时需求。
 
+## Docker 连接方式
+
+`DockerSandbox` 通过 `docker.from_env()` 连接 Docker。默认读取 `DOCKER_HOST` 环境变量，未设置时回退到本地 Unix Socket（`/var/run/docker.sock`）。
+
+### 宿主机 Docker（默认）
+
+最常见的方式 — 代码运行在宿主机上，连接本地 Docker daemon，无需额外配置：
+
+```python
+sandbox = DockerSandbox()  # 连接 /var/run/docker.sock
+```
+
+### Docker-in-Docker
+
+当代码本身运行在容器内部时，有两种方式：
+
+**方式一 — Socket 挂载（Docker outside of Docker）**
+
+将宿主机的 Docker Socket 挂载进容器，共享宿主机的 Docker daemon，更简单轻量：
+
+```bash
+docker run -v /var/run/docker.sock:/var/run/docker.sock your-image
+```
+
+```python
+# 容器内使用方式完全相同
+sandbox = DockerSandbox()
+```
+
+> **注意：** 这会让容器获得宿主机 Docker daemon 的访问权限，请确保安全影响在可接受范围内。
+
+**方式二 — 真正的 Docker-in-Docker（DinD）**
+
+使用 `docker:dind` 镜像，在容器内部运行独立的 Docker daemon，与宿主机完全隔离，但需要 `--privileged`：
+
+```bash
+docker run --privileged docker:dind
+```
+
+```python
+# 在 DinD 容器内，连接内部 daemon
+sandbox = DockerSandbox(
+    docker_client_kwargs={"base_url": "unix:///var/run/docker.sock"}
+)
+```
+
+> **注意：** `--privileged` 会赋予容器扩展的 Linux 能力。除非需要内外 Docker daemon 完全隔离，否则优先使用 Socket 挂载方式。
+
+### 远程 Docker
+
+通过 TCP 连接另一台机器上的 Docker daemon。
+
+**方式一：环境变量**（推荐）
+
+```bash
+export DOCKER_HOST=tcp://192.168.1.100:2375
+```
+
+```python
+sandbox = DockerSandbox()  # 自动读取 DOCKER_HOST
+```
+
+**方式二：通过 `docker_client_kwargs` 显式指定**
+
+```python
+sandbox = DockerSandbox(
+    docker_client_kwargs={"base_url": "tcp://192.168.1.100:2375"}
+)
+```
+
+**启用 TLS：**
+
+```python
+import docker.tls
+
+sandbox = DockerSandbox(
+    docker_client_kwargs={
+        "base_url": "tcp://192.168.1.100:2376",
+        "tls": docker.tls.TLSConfig(
+            ca_cert="/path/to/ca.pem",
+            client_cert=("/path/to/cert.pem", "/path/to/key.pem"),
+        ),
+    }
+)
+```
+
 ## 使用教程
 
 ### deepagents
@@ -138,6 +224,7 @@ finally:
 | `auto_remove` | `bool` | `True` | 关闭时是否删除容器 |
 | `execute_timeout` | `int` | `120` | 默认超时时间（秒） |
 | `max_output_bytes` | `int` | `512000` | 输出截断上限（字节） |
+| `docker_client_kwargs` | `dict \| None` | `None` | `docker.from_env()` 的额外参数（如 `base_url`、`tls`） |
 
 ### 主要方法
 
