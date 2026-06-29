@@ -1,10 +1,44 @@
 [project]
 name = "langchain-docker-backend"
-version = "0.1.0"
+version = "1.0.0"
 description = "Docker sandbox backend for AI agents - execute code safely in isolated containers"
 readme = "README.md"
 requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "zhengjie9510"},
+]
+keywords = ["docker", "sandbox", "ai-agents", "deepagents", "code-execution"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Systems Administration",
+]
 dependencies = [
     "deepagents>=0.6.12",
     "docker>=7.1.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/zhengjie9510/langchain-docker-backend"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: tests that require a running Docker daemon",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

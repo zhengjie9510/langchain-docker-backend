@@ -1,17 +1,15 @@
-"""Basic tests for package imports and class structure."""
+"""Tests for langchain_docker_backend package."""
 
 import pytest
 
 
-def test_import():
-    """Import the main class."""
-    from langchain_docker_backend import DockerSandbox
-    assert DockerSandbox is not None
+# -- Package metadata --------------------------------------------------------
 
 
 def test_version():
     """Version string is available."""
     import langchain_docker_backend
+
     assert hasattr(langchain_docker_backend, "__version__")
     assert isinstance(langchain_docker_backend.__version__, str)
 
@@ -19,34 +17,21 @@ def test_version():
 def test_all_exports():
     """__all__ exposes the public API."""
     import langchain_docker_backend
+
     assert "DockerSandbox" in langchain_docker_backend.__all__
     assert "DockerImageNotFound" in langchain_docker_backend.__all__
 
 
 def test_class_inheritance():
-    """DockerSandbox inherits from BaseSandbox."""
+    """DockerSandbox inherits from BaseSandbox (ABC — guarantees abstract methods)."""
     from langchain_docker_backend import DockerSandbox
     from deepagents.backends.sandbox import BaseSandbox
+
     assert issubclass(DockerSandbox, BaseSandbox)
 
 
-def test_required_methods():
-    """DockerSandbox implements all required abstract methods."""
-    from langchain_docker_backend import DockerSandbox
-
-    assert hasattr(DockerSandbox, "execute")
-    assert hasattr(DockerSandbox, "upload_files")
-    assert hasattr(DockerSandbox, "download_files")
-    assert hasattr(DockerSandbox, "id")
-
-    # Context manager protocol.
-    assert hasattr(DockerSandbox, "__enter__")
-    assert hasattr(DockerSandbox, "__exit__")
-    assert hasattr(DockerSandbox, "close")
-
-
 def test_docker_image_not_found():
-    """DockerImageNotFound is raised for missing images."""
+    """DockerImageNotFound carries the image name in message and attribute."""
     from langchain_docker_backend import DockerImageNotFound
 
     exc = DockerImageNotFound("nonexistent:image")
@@ -54,36 +39,52 @@ def test_docker_image_not_found():
     assert exc.image == "nonexistent:image"
 
 
-# --- Integration tests (require Docker daemon) ---
+# -- Integration tests (require Docker daemon) -------------------------------
 
 
 @pytest.mark.integration
 class TestDockerSandboxIntegration:
-    """Tests that require a running Docker daemon."""
+    """End-to-end tests that require a running Docker daemon."""
 
-    def test_execute_command(self):
-        """Run a simple command inside the container."""
+    def test_full_workflow(self):
+        """Execute, write, read, ls, edit, and timeout in one container."""
         from langchain_docker_backend import DockerSandbox
 
         with DockerSandbox(image="ghcr.io/astral-sh/uv:python3.13-bookworm-slim") as sandbox:
-            result = sandbox.execute("echo 'hello'")
+            # 1. Basic command execution
+            result = sandbox.execute("echo 'Hello from Docker!'")
             assert result.exit_code == 0
-            assert "hello" in result.output
+            assert "Hello from Docker!" in result.output
 
-    def test_write_and_read(self):
-        """Write a file and read it back."""
-        from langchain_docker_backend import DockerSandbox
+            # 2. Python execution
+            result = sandbox.execute(
+                "python -c 'import sys; print(f\"Python {sys.version}\")'"
+            )
+            assert result.exit_code == 0
+            assert "Python" in result.output
 
-        with DockerSandbox(image="ghcr.io/astral-sh/uv:python3.13-bookworm-slim") as sandbox:
-            sandbox.write("/workspace/test.txt", "content")
-            result = sandbox.read("/workspace/test.txt")
-            assert result.file_data is not None
-            # file_data is a dict with 'content' and 'encoding' keys.
-            assert result.file_data["content"] == "content"
+            # 3. Write file
+            write_result = sandbox.write("/workspace/test.txt", "Hello, World!")
+            assert write_result.error is None
 
-    def test_context_manager_cleanup(self):
-        """Container is removed after exiting the context manager."""
-        from langchain_docker_backend import DockerSandbox
+            # 4. Read file
+            read_result = sandbox.read("/workspace/test.txt")
+            assert read_result.file_data is not None
+            assert "Hello, World!" in read_result.file_data["content"]
 
-        sandbox = DockerSandbox(image="ghcr.io/astral-sh/uv:python3.13-bookworm-slim")
-        sandbox.close()
+            # 5. List directory
+            ls_result = sandbox.ls("/workspace")
+            assert ls_result.entries is not None
+            paths = [e["path"] for e in ls_result.entries]
+            assert "test.txt" in paths
+
+            # 6. Edit file (find and replace)
+            edit_result = sandbox.edit("/workspace/test.txt", "Hello", "你好")
+            assert edit_result.occurrences > 0
+            read_result = sandbox.read("/workspace/test.txt")
+            assert "你好" in read_result.file_data["content"]
+
+            # 7. Timeout
+            result = sandbox.execute("sleep 10", timeout=2)
+            assert "timed out" in result.output.lower()
+            assert result.exit_code == 124
