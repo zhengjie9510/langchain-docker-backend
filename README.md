@@ -153,6 +153,27 @@ finally:
     sandbox.close()
 ```
 
+### Deep Agents Code
+
+With Deep Agents Code, use Docker as a sandbox provider by adding the following to `~/.deepagents/config.toml`:
+
+```toml
+[sandboxes]
+default = "docker"
+
+[sandboxes.providers.docker]
+class_path = "langchain_docker_backend.provider:DockerSandboxProvider"
+working_dir = "/workspace"
+package = "langchain-docker-backend"
+supports_sandbox_id = true
+supports_snapshot_name = false
+
+[sandboxes.providers.docker.params]
+image = "python:3.12-slim-bookworm"
+```
+
+Then run as `dcode --sandbox docker`
+
 ### Direct Usage
 
 Beyond agent use, you can interact with the sandbox directly — execute commands, read and write files, list directories, edit file content.
