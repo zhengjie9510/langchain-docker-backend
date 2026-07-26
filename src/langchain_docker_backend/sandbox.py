@@ -17,6 +17,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import tarfile
@@ -42,6 +43,42 @@ _DEFAULT_EXECUTE_TIMEOUT = 120  # seconds
 _DEFAULT_MAX_OUTPUT_BYTES = 500 * 1024  # 500 KiB
 
 
+def _docker(func, *args, **kwargs):
+    """Call Docker SDK in a thread when inside an async event loop.
+
+    The Docker SDK is synchronous and raises ``RuntimeError`` if called
+    from an active event loop (``Blocking call to socket.socket.connect``).
+    This helper detects that situation and runs the call in a dedicated
+    thread to avoid deadlocking the event loop.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No event loop – call directly.
+        return func(*args, **kwargs)
+    # Inside an event loop – run in a dedicated thread.
+    result_holder = {}
+    error_holder = {}
+    done = threading.Event()
+
+    def wrapper():
+        try:
+            result_holder["result"] = func(*args, **kwargs)
+        except Exception as exc:
+            error_holder["error"] = exc
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=wrapper, daemon=True)
+    thread.start()
+
+    if not done.wait(timeout=60):
+        raise TimeoutError(f"Docker SDK call to {func.__qualname__} timed out after 60s")
+    if "error" in error_holder:
+        raise error_holder["error"]
+    return result_holder.get("result")
+
+
 class DockerSandbox(BaseSandbox):
     """Docker container sandbox.
 
@@ -61,7 +98,11 @@ class DockerSandbox(BaseSandbox):
         execute_timeout: Default timeout in seconds for ``execute()``.
         max_output_bytes: Maximum output bytes before truncation.
         docker_client_kwargs: Extra keyword arguments for ``docker.from_env()``.
+        environment: Environment variables to set inside the container.
     """
+
+    # Custom exception for container-not-found errors.
+    NotFound = docker.errors.NotFound
 
     def __init__(
         self,
@@ -73,6 +114,7 @@ class DockerSandbox(BaseSandbox):
         execute_timeout: int = _DEFAULT_EXECUTE_TIMEOUT,
         max_output_bytes: int = _DEFAULT_MAX_OUTPUT_BYTES,
         docker_client_kwargs: dict[str, Any] | None = None,
+        environment: dict[str, str] | None = None,
     ) -> None:
         self._image = image
         self._container_name = container_name or f"sandbox-{uuid.uuid4().hex[:12]}"
@@ -81,9 +123,10 @@ class DockerSandbox(BaseSandbox):
         self._auto_remove = auto_remove
         self._default_timeout = execute_timeout
         self._max_output_bytes = max_output_bytes
+        self._environment = environment or {}
 
         client_kwargs = docker_client_kwargs or {}
-        self._client = docker.from_env(**client_kwargs)
+        self._client = _docker(docker.from_env, **client_kwargs)
 
         # Verify the image is available locally before creating the container.
         self._check_image()
@@ -97,6 +140,101 @@ class DockerSandbox(BaseSandbox):
             image,
         )
 
+    @classmethod
+    def from_id(
+        cls,
+        container_id: str,
+        *,
+        docker_client_kwargs: dict[str, Any] | None = None,
+        working_dir: str = _DEFAULT_WORKING_DIR,
+        execute_timeout: int = _DEFAULT_EXECUTE_TIMEOUT,
+    ) -> DockerSandbox:
+        """Attach to an existing container by ID.
+
+        Args:
+            container_id: Container ID to attach to.
+            docker_client_kwargs: Extra kwargs for ``docker.from_env()``.
+            working_dir: Working directory inside the container.
+            execute_timeout: Default timeout in seconds for ``execute()``.
+
+        Returns:
+            A ``DockerSandbox`` instance backed by the existing container.
+
+        Raises:
+            NotFound: If the container does not exist or is not running.
+        """
+        client_kwargs = docker_client_kwargs or {}
+        client = _docker(docker.from_env, **client_kwargs)
+
+        try:
+            container = _docker(client.containers.get, container_id)
+        except docker.errors.NotFound as exc:
+            raise cls.NotFound(str(exc)) from exc
+
+        # Check if container is running
+        _docker(container.reload)
+        if container.status != "running":
+            raise cls.NotFound(f"Container {container_id} is in state '{container.status}'")
+
+        return cls.from_container(
+            container,
+            working_dir=working_dir,
+            execute_timeout=execute_timeout,
+        )
+
+    @classmethod
+    def from_container(
+        cls,
+        container: Container,
+        *,
+        working_dir: str = _DEFAULT_WORKING_DIR,
+        execute_timeout: int = _DEFAULT_EXECUTE_TIMEOUT,
+    ) -> DockerSandbox:
+        """Create a sandbox backend from an already-running container.
+
+        This is used by sandbox providers to reattach to an existing container
+        (e.g. via ``dcode --sandbox-id``).
+
+        Args:
+            container: An existing running container from the Docker API.
+            working_dir: Working directory inside the container.
+            execute_timeout: Default timeout in seconds for ``execute()``.
+
+        Returns:
+            A new ``DockerSandbox`` instance backed by the provided container.
+        """
+        instance = object.__new__(cls)
+        instance._client = _docker(docker.from_env)
+        instance._container = container
+        instance._container_name = container.name or container.short_id
+        instance._working_dir = working_dir
+        instance._auto_remove = False  # caller manages lifecycle
+        instance._default_timeout = execute_timeout
+        instance._max_output_bytes = _DEFAULT_MAX_OUTPUT_BYTES
+        instance._image = container.attrs["Config"]["Image"]
+        instance._volumes = {}
+        return instance
+
+    @classmethod
+    def stop(cls, container_id: str) -> None:
+        """Stop and remove a container by ID.
+
+        Args:
+            container_id: Container ID to stop and remove.
+
+        Raises:
+            NotFound: If the container does not exist.
+        """
+        client = _docker(docker.from_env)
+        try:
+            container = _docker(client.containers.get, container_id)
+        except docker.errors.NotFound as exc:
+            raise cls.NotFound(str(exc)) from exc
+
+        _docker(container.stop, timeout=5)
+        _docker(container.remove, force=True)
+        logger.info("Container %s stopped and removed", container_id)
+
     def _check_image(self) -> None:
         """Check that the Docker image exists locally.
 
@@ -104,13 +242,13 @@ class DockerSandbox(BaseSandbox):
             DockerImageNotFound: If the image is not available locally.
         """
         try:
-            self._client.images.get(self._image)
+            _docker(self._client.images.get, self._image)
         except docker.errors.ImageNotFound:
             raise DockerImageNotFound(self._image) from None
 
     def _create_container(self) -> Container:
         """Create and start the container."""
-        return self._client.containers.run(
+        kwargs = dict(
             image=self._image,
             name=self._container_name,
             command="tail -f /dev/null",
@@ -120,6 +258,9 @@ class DockerSandbox(BaseSandbox):
             stdin_open=True,
             tty=False,
         )
+        if self._environment:
+            kwargs["environment"] = self._environment
+        return _docker(self._client.containers.run, **kwargs)
 
     @property
     def id(self) -> str:
@@ -234,7 +375,7 @@ class DockerSandbox(BaseSandbox):
                 tar_stream.seek(0)
 
                 self.execute(f"mkdir -p {dir_path}")
-                self._container.put_archive("/", tar_stream)
+                _docker(self._container.put_archive, "/", tar_stream)
 
                 responses.append(FileUploadResponse(path=file_path, error=None))
                 logger.debug("Uploaded file: %s (%d bytes)", file_path, len(content))
@@ -262,7 +403,7 @@ class DockerSandbox(BaseSandbox):
                 if not file_path.startswith("/"):
                     file_path = f"{self._working_dir}/{file_path}"
 
-                tar_stream, _stat = self._container.get_archive(file_path)
+                tar_stream, _stat = _docker(self._container.get_archive, file_path)
 
                 tar_data = io.BytesIO()
                 for chunk in tar_stream:
@@ -324,16 +465,16 @@ class DockerSandbox(BaseSandbox):
     def close(self) -> None:
         """Stop and optionally remove the container."""
         try:
-            self._container.stop(timeout=5)
+            _docker(self._container.stop, timeout=5)
             if self._auto_remove:
-                self._container.remove(force=True)
+                _docker(self._container.remove, force=True)
                 logger.info("Container %s removed", self._container.short_id)
             else:
                 logger.info("Container %s stopped", self._container.short_id)
         except Exception as e:
             logger.warning("Error closing container: %s", e)
         finally:
-            self._client.close()
+            _docker(self._client.close)
 
     def __enter__(self) -> DockerSandbox:
         return self

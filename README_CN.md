@@ -153,6 +153,27 @@ finally:
     sandbox.close()
 ```
 
+### Deep Agents Code
+
+使用 Deep Agents Code 时，可以通过添加以下内容将 Docker 用作沙箱提供程序: `~/.deepagents/config.toml`:
+
+```toml
+[sandboxes]
+default = "docker"
+
+[sandboxes.providers.docker]
+class_path = "langchain_docker_backend.provider:DockerSandboxProvider"
+working_dir = "/workspace"
+package = "langchain-docker-backend"
+supports_sandbox_id = true
+supports_snapshot_name = false
+
+[sandboxes.providers.docker.params]
+image = "python:3.12-slim-bookworm"
+```
+
+然后以……身份运行 `dcode --sandbox docker`
+
 ### 基础用法
 
 除了配合 agent 使用，也可以直接操作沙箱 — 执行命令、读写文件、列目录、编辑内容。
