@@ -41,6 +41,22 @@ _DEFAULT_WORKING_DIR = "/workspace"
 _DEFAULT_EXECUTE_TIMEOUT = 120  # seconds
 _DEFAULT_MAX_OUTPUT_BYTES = 500 * 1024  # 500 KiB
 
+# ``containers.run()`` kwargs that DockerSandbox manages itself and that
+# ``container_kwargs`` may therefore not override.
+_RESERVED_RUN_KWARGS = frozenset(
+    {
+        "image",
+        "name",
+        "command",
+        "detach",
+        "stdin_open",
+        "tty",
+        "working_dir",
+        "volumes",
+        "auto_remove",
+    }
+)
+
 
 class DockerSandbox(BaseSandbox):
     """Docker container sandbox.
@@ -61,6 +77,20 @@ class DockerSandbox(BaseSandbox):
         execute_timeout: Default timeout in seconds for ``execute()``.
         max_output_bytes: Maximum output bytes before truncation.
         docker_client_kwargs: Extra keyword arguments for ``docker.from_env()``.
+        network_mode: Container network mode, e.g. ``"bridge"``, ``"host"``,
+            ``"none"`` or ``"container:<id>"``.  Uses Docker's default
+            (``bridge``) when ``None``.
+        dns: Custom DNS servers for the container, e.g. ``["1.1.1.1"]``.
+        gpus: GPUs to expose to the container: ``"all"`` or a positive
+            number of GPUs.  Requires the NVIDIA Container Toolkit on the
+            host.  No GPUs when ``None``.
+        container_kwargs: Extra keyword arguments for
+            ``client.containers.run()`` (e.g. ``mem_limit``, ``nano_cpus``,
+            ``devices``, ``shm_size``).  Keys managed by this class (such as
+            ``image``, ``name`` or ``volumes``) are rejected.
+
+    Raises:
+        ValueError: If ``gpus`` or ``container_kwargs`` is invalid.
     """
 
     def __init__(
@@ -73,6 +103,10 @@ class DockerSandbox(BaseSandbox):
         execute_timeout: int = _DEFAULT_EXECUTE_TIMEOUT,
         max_output_bytes: int = _DEFAULT_MAX_OUTPUT_BYTES,
         docker_client_kwargs: dict[str, Any] | None = None,
+        network_mode: str | None = None,
+        dns: list[str] | None = None,
+        gpus: int | str | None = None,
+        container_kwargs: dict[str, Any] | None = None,
     ) -> None:
         self._image = image
         self._container_name = container_name or f"sandbox-{uuid.uuid4().hex[:12]}"
@@ -81,6 +115,13 @@ class DockerSandbox(BaseSandbox):
         self._auto_remove = auto_remove
         self._default_timeout = execute_timeout
         self._max_output_bytes = max_output_bytes
+        self._network_mode = network_mode
+        self._dns = dns
+        self._gpus = gpus
+        self._container_kwargs = dict(container_kwargs or {})
+
+        # Validate container options before touching the Docker daemon.
+        self._validate_container_options()
 
         client_kwargs = docker_client_kwargs or {}
         self._client = docker.from_env(**client_kwargs)
@@ -92,10 +133,68 @@ class DockerSandbox(BaseSandbox):
         self.execute(f"mkdir -p {working_dir}")
 
         logger.info(
-            "DockerSandbox initialized: container=%s, image=%s",
+            "DockerSandbox initialized: container=%s, image=%s, network_mode=%s",
             self._container.short_id,
             image,
+            network_mode or "default",
         )
+
+    def _validate_container_options(self) -> None:
+        """Validate ``gpus`` and ``container_kwargs``.
+
+        Raises:
+            ValueError: If an option is invalid or conflicts with another.
+        """
+        reserved = _RESERVED_RUN_KWARGS & self._container_kwargs.keys()
+        if reserved:
+            raise ValueError(
+                f"container_kwargs may not set {sorted(reserved)}; "
+                "use the corresponding DockerSandbox argument instead."
+            )
+
+        for key, value in (("network_mode", self._network_mode), ("dns", self._dns)):
+            if value is not None and key in self._container_kwargs:
+                raise ValueError(
+                    f"'{key}' was given both as an argument and in container_kwargs."
+                )
+
+        gpus = self._gpus
+        if gpus is not None and gpus != "all":
+            if isinstance(gpus, bool) or not isinstance(gpus, int) or gpus < 1:
+                raise ValueError(
+                    f"gpus must be 'all' or a positive integer, got {gpus!r}."
+                )
+
+    def _build_run_kwargs(self) -> dict[str, Any]:
+        """Build the keyword arguments for ``client.containers.run()``."""
+        run_kwargs: dict[str, Any] = {
+            "image": self._image,
+            "name": self._container_name,
+            "command": "tail -f /dev/null",
+            "working_dir": self._working_dir,
+            "volumes": self._volumes,
+            "detach": True,
+            "stdin_open": True,
+            "tty": False,
+        }
+        if self._network_mode is not None:
+            run_kwargs["network_mode"] = self._network_mode
+        if self._dns is not None:
+            run_kwargs["dns"] = self._dns
+
+        extra = dict(self._container_kwargs)
+        if self._gpus is not None:
+            device_requests = list(extra.pop("device_requests", None) or [])
+            device_requests.append(
+                docker.types.DeviceRequest(
+                    count=-1 if self._gpus == "all" else self._gpus,
+                    capabilities=[["gpu"]],
+                )
+            )
+            extra["device_requests"] = device_requests
+
+        run_kwargs.update(extra)
+        return run_kwargs
 
     def _check_image(self) -> None:
         """Check that the Docker image exists locally.
@@ -110,16 +209,7 @@ class DockerSandbox(BaseSandbox):
 
     def _create_container(self) -> Container:
         """Create and start the container."""
-        return self._client.containers.run(
-            image=self._image,
-            name=self._container_name,
-            command="tail -f /dev/null",
-            working_dir=self._working_dir,
-            volumes=self._volumes,
-            detach=True,
-            stdin_open=True,
-            tty=False,
-        )
+        return self._client.containers.run(**self._build_run_kwargs())
 
     @property
     def id(self) -> str:

@@ -203,6 +203,31 @@ finally:
     sandbox.close()
 ```
 
+### Network & Hardware Configuration
+
+Network, DNS, GPU and resource settings are applied when the container is created:
+
+```python
+from langchain_docker_backend import DockerSandbox
+
+with DockerSandbox(
+    network_mode="host",          # "bridge" (Docker default), "host", "none", "container:<id>"
+    dns=["1.1.1.1", "8.8.8.8"],   # custom DNS servers
+    gpus="all",                   # "all" or a number of GPUs
+    container_kwargs={            # any other docker-py containers.run() option
+        "mem_limit": "4g",
+        "nano_cpus": 2_000_000_000,               # 2 CPUs
+        "shm_size": "2g",
+        "devices": ["/dev/accel0:/dev/accel0"],   # pass through host devices
+    },
+) as sandbox:
+    sandbox.execute("pip install requests")
+```
+
+- **No internet inside the sandbox?** Containers on Docker's default `bridge` network already have outbound access. If package installs or web requests fail, DNS is the usual cause (e.g. a host using `127.0.0.53` and a network that blocks Docker's `8.8.8.8` fallback) — set `dns=[...]` to resolvers reachable from your network before reaching for `network_mode="host"`.
+- **GPUs** require the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) on the host. Other accelerators (NPUs, TPUs, ...) can be exposed via `container_kwargs={"devices": [...]}` or `{"device_requests": [...]}`.
+- **Isolation:** `network_mode="host"`, host `devices` and `container_kwargs={"privileged": True}` weaken the sandbox boundary. Use `network_mode="none"` for fully offline agents.
+
 ## Design
 
 `DockerSandbox` implements `BaseSandbox`, which defines a full set of sandbox operations — synchronous and asynchronous — including `execute`, file reads and writes, directory listing, glob, grep, and more.
@@ -225,6 +250,10 @@ The exception is `upload_files` and `download_files`. These remain **developer-o
 | `execute_timeout` | `int` | `120` | Default timeout in seconds |
 | `max_output_bytes` | `int` | `512000` | Max output bytes before truncation |
 | `docker_client_kwargs` | `dict \| None` | `None` | Extra keyword arguments for `docker.from_env()` (e.g. `base_url`, `tls`) |
+| `network_mode` | `str \| None` | `None` (Docker default `bridge`) | Container network mode: `"bridge"`, `"host"`, `"none"`, `"container:<id>"` |
+| `dns` | `list[str] \| None` | `None` | Custom DNS servers |
+| `gpus` | `int \| str \| None` | `None` | GPUs to expose: `"all"` or a positive count (needs NVIDIA Container Toolkit) |
+| `container_kwargs` | `dict \| None` | `None` | Extra keyword arguments for `client.containers.run()` (e.g. `mem_limit`, `nano_cpus`, `devices`, `shm_size`) |
 
 ### Key Methods
 

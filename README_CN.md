@@ -203,6 +203,31 @@ finally:
     sandbox.close()
 ```
 
+### 网络与硬件配置
+
+网络、DNS、GPU 及资源限制在创建容器时生效：
+
+```python
+from langchain_docker_backend import DockerSandbox
+
+with DockerSandbox(
+    network_mode="host",          # "bridge"（Docker 默认）、"host"、"none"、"container:<id>"
+    dns=["1.1.1.1", "8.8.8.8"],   # 自定义 DNS 服务器
+    gpus="all",                   # "all" 或 GPU 数量
+    container_kwargs={            # docker-py containers.run() 的其他任意参数
+        "mem_limit": "4g",
+        "nano_cpus": 2_000_000_000,               # 2 个 CPU
+        "shm_size": "2g",
+        "devices": ["/dev/accel0:/dev/accel0"],   # 透传宿主机设备
+    },
+) as sandbox:
+    sandbox.execute("pip install requests")
+```
+
+- **沙箱内无法联网？** 使用 Docker 默认 `bridge` 网络的容器本身即可访问外网。若安装依赖或发起网络请求失败，通常是 DNS 问题（例如宿主机使用 `127.0.0.53`，而所在网络屏蔽了 Docker 回退使用的 `8.8.8.8`）——优先设置 `dns=[...]` 为当前网络可访问的 DNS，再考虑 `network_mode="host"`。
+- **GPU** 需要宿主机安装 [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)。其他加速器（NPU、TPU 等）可通过 `container_kwargs={"devices": [...]}` 或 `{"device_requests": [...]}` 暴露。
+- **隔离性：** `network_mode="host"`、宿主机 `devices` 以及 `container_kwargs={"privileged": True}` 都会削弱沙箱隔离。需要完全离线的 Agent 请使用 `network_mode="none"`。
+
 ## 设计说明
 
 `DockerSandbox` 实现了 `BaseSandbox`，后者定义了一整套沙箱操作（同步 + 异步），包括 `execute`、文件读写、目录列表、glob、grep 等。
@@ -225,6 +250,10 @@ finally:
 | `execute_timeout` | `int` | `120` | 默认超时时间（秒） |
 | `max_output_bytes` | `int` | `512000` | 输出截断上限（字节） |
 | `docker_client_kwargs` | `dict \| None` | `None` | `docker.from_env()` 的额外参数（如 `base_url`、`tls`） |
+| `network_mode` | `str \| None` | `None`（Docker 默认 `bridge`） | 容器网络模式：`"bridge"`、`"host"`、`"none"`、`"container:<id>"` |
+| `dns` | `list[str] \| None` | `None` | 自定义 DNS 服务器 |
+| `gpus` | `int \| str \| None` | `None` | 暴露给容器的 GPU：`"all"` 或正整数（需 NVIDIA Container Toolkit） |
+| `container_kwargs` | `dict \| None` | `None` | `client.containers.run()` 的额外参数（如 `mem_limit`、`nano_cpus`、`devices`、`shm_size`） |
 
 ### 主要方法
 
