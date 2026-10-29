@@ -1,4 +1,4 @@
-"""Expose an existing DockerSandbox as an MCP tool server."""
+"""Expose a DockerSandbox through MCP."""
 
 from dataclasses import asdict
 from typing import Annotated
@@ -10,129 +10,72 @@ from langchain_docker_backend.sandbox import DockerSandbox
 
 
 def create_mcp_server(sandbox: DockerSandbox) -> MCPServer:
-    """Register sandbox operations on an MCP server.
-
-    The caller owns the sandbox and must close it after the server stops.
-    Install the optional ``mcp`` dependency before importing this module.
-    """
+    """Register tools for a sandbox. The caller is responsible for closing it."""
     server = MCPServer("docker-sandbox")
 
     @server.tool()
-    def ls(
-        path: Annotated[
-            str,
-            Field(description="Directory to list."),
-        ],
-    ) -> dict:
-        """List files and directories with metadata.
-
-        Use this to explore a directory before choosing files to read or edit.
-        """
+    def ls(path: Annotated[str, Field(description="Directory to list.")]) -> dict:
+        """List files and directories with metadata to locate files to read or edit."""
         return asdict(sandbox.ls(path))
 
     @server.tool()
     def read(
-        path: Annotated[
-            str,
-            Field(description="File to read."),
-        ],
-        offset: Annotated[int, Field(description="Zero-based starting line for text files.")] = 0,
-        limit: Annotated[
-            int,
-            Field(description="Maximum text lines to return; use fewer for large files."),
-        ] = 2000,
+        path: Annotated[str, Field(description="File to read.")],
+        offset: Annotated[int, Field(description="First text line, starting at zero.")] = 0,
+        limit: Annotated[int, Field(description="Maximum number of text lines.")] = 2000,
     ) -> dict:
-        """Read a file.
-
-        Text reads support line-based pagination. Binary content is returned
-        base64-encoded without pagination.
-        """
+        """Read a file. Text supports pagination; binary content is base64 encoded."""
         return asdict(sandbox.read(path, offset=offset, limit=limit))
 
     @server.tool()
     def write(
-        path: Annotated[
-            str,
-            Field(description="Path for the new file."),
-        ],
-        content: Annotated[str, Field(description="UTF-8 text to write to the new file.")],
+        path: Annotated[str, Field(description="Path for the new file.")],
+        content: Annotated[str, Field(description="UTF-8 text to write.")],
     ) -> dict:
-        """Create a new text file.
-
-        Returns an error if the file already exists; use edit to change it.
-        """
+        """Create a text file. Returns an error if the file already exists."""
         return asdict(sandbox.write(path, content))
 
     @server.tool()
     def edit(
-        path: Annotated[
-            str,
-            Field(description="File to edit."),
-        ],
-        old_string: Annotated[
-            str, Field(description="Exact text to find, including its whitespace.")
-        ],
-        new_string: Annotated[
-            str, Field(description="Replacement text, different from old_string.")
-        ],
+        path: Annotated[str, Field(description="File to edit.")],
+        old_string: Annotated[str, Field(description="Exact text to find.")],
+        new_string: Annotated[str, Field(description="Replacement text.")],
         replace_all: Annotated[
-            bool,
-            Field(description="Replace all occurrences; otherwise the text must be unique."),
+            bool, Field(description="Replace every match; otherwise the match must be unique.")
         ] = False,
     ) -> dict:
-        """Replace exact text in an existing file.
-
-        Read the file first so the search text and whitespace match.
-        """
+        """Replace exact text in an existing file. Read the file before editing."""
         return asdict(sandbox.edit(path, old_string, new_string, replace_all))
 
     @server.tool()
     def glob(
-        pattern: Annotated[str, Field(description="File path glob, such as '**/*.py' or '*.txt'.")],
+        pattern: Annotated[str, Field(description="Path pattern, such as '**/*.py'.")],
         path: Annotated[
-            str,
-            Field(description="Base directory; defaults to the sandbox working directory."),
+            str, Field(description="Base directory; defaults to the working directory.")
         ] = ".",
     ) -> dict:
-        """Find files by path pattern.
-
-        Use this when you know a filename or extension. '*' matches characters;
-        '**' matches directories.
-        """
+        """Find files by path pattern. Use '*' for characters and '**' for directories."""
         return asdict(sandbox.glob(pattern, path=path))
 
     @server.tool()
     def grep(
-        pattern: Annotated[
-            str, Field(description="Literal text to find; regular expressions are unsupported.")
-        ],
+        pattern: Annotated[str, Field(description="Literal text to find, not a regex.")],
         path: Annotated[
-            str | None,
-            Field(description="File or directory to search; defaults to the working directory."),
+            str | None, Field(description="File or directory; defaults to the working directory.")
         ] = None,
-        glob: Annotated[
-            str | None, Field(description="Optional filename filter, such as '*.py'.")
-        ] = None,
+        glob: Annotated[str | None, Field(description="Filename filter, such as '*.py'.")] = None,
     ) -> dict:
-        """Search file contents for literal text.
-
-        Returns matching files and lines. Regex characters are ordinary text.
-        """
+        """Search file contents for literal text and return matching lines."""
         return asdict(sandbox.grep(pattern, path=path, glob=glob))
 
     @server.tool()
     def execute(
-        command: Annotated[
-            str, Field(description="Shell command to run inside the sandbox container.")
-        ],
+        command: Annotated[str, Field(description="Shell command to run in the sandbox.")],
         timeout: Annotated[
-            int | None, Field(description="Optional seconds; overrides the sandbox default.")
+            int | None, Field(description="Timeout in seconds; overrides the sandbox default.")
         ] = None,
     ) -> dict:
-        """Run a shell command in the sandbox working directory.
-
-        Returns combined stdout/stderr, exit code, and an output truncation flag.
-        """
+        """Run a command and return its output, exit code, and truncation flag."""
         return asdict(sandbox.execute(command, timeout=timeout))
 
     return server

@@ -118,7 +118,7 @@ from langchain_docker_backend.mcp import create_mcp_server
 
 
 def main():
-    with DockerSandbox(image="python:3.13-slim", working_dir="/workspace/project") as sandbox:
+    with DockerSandbox(working_dir="/workspace/project") as sandbox:
         create_mcp_server(sandbox).run(transport="streamable-http")
 
 
@@ -137,9 +137,7 @@ from deepagents import create_deep_agent
 from langchain_anthropic import ChatAnthropic
 from langchain_docker_backend import DockerSandbox
 
-sandbox = DockerSandbox()
-
-try:
+with DockerSandbox() as sandbox:
     agent = create_deep_agent(
         model=ChatAnthropic(model="claude-sonnet-4-6"),
         system_prompt="You are a coding assistant with sandbox access.",
@@ -149,8 +147,6 @@ try:
         "messages": [{"role": "user", "content": "Write and run a fizzbuzz script"}]
     })
     print(result)
-finally:
-    sandbox.close()
 ```
 
 ### LangChain
@@ -163,9 +159,7 @@ from langchain_anthropic import ChatAnthropic
 from deepagents.middleware.filesystem import FilesystemMiddleware
 from langchain_docker_backend import DockerSandbox
 
-sandbox = DockerSandbox()
-
-try:
+with DockerSandbox() as sandbox:
     agent = create_agent(
         model=ChatAnthropic(model="claude-sonnet-4-6"),
         middleware=[FilesystemMiddleware(backend=sandbox)],
@@ -173,8 +167,6 @@ try:
     result = agent.invoke({
         "messages": [{"role": "user", "content": "Write a fizzbuzz script and run it"}]
     })
-finally:
-    sandbox.close()
 ```
 
 ### Direct Usage
@@ -192,9 +184,7 @@ sandbox = DockerSandbox()                               # default (uv + Python 3
 ```python
 from langchain_docker_backend import DockerSandbox
 
-sandbox = DockerSandbox()
-
-try:
+with DockerSandbox() as sandbox:
     # Execute commands
     result = sandbox.execute("echo 'Hello from Docker!'")
     print(result.output)      # Hello from Docker!
@@ -223,8 +213,6 @@ try:
     # Commands time out
     result = sandbox.execute("sleep 10", timeout=2)
     print(result.exit_code)   # 124
-finally:
-    sandbox.close()
 ```
 
 ### Network & Hardware Configuration
@@ -284,10 +272,12 @@ The exception is `upload_files` and `download_files`. These remain **developer-o
 | Method | Description |
 |--------|-------------|
 | `execute(command, *, timeout)` | Run a shell command |
-| `write(path, content)` | Write a text file |
-| `read(path)` | Read a text file |
+| `write(path, content)` | Create a text file; fail if it exists |
+| `read(path)` | Read a file |
 | `ls(path)` | List directory contents |
-| `edit(path, find, replace)` | Find and replace in a file |
+| `edit(path, old_string, new_string)` | Replace exact text in a file |
+| `glob(pattern, path)` | Find files by path pattern |
+| `grep(pattern, path, glob)` | Search file contents for literal text |
 | `upload_files(files)` | Upload binary files (tar-based) |
 | `download_files(paths)` | Download binary files (tar-based) |
 | `close()` | Stop and optionally remove container |

@@ -118,7 +118,7 @@ from langchain_docker_backend.mcp import create_mcp_server
 
 
 def main():
-    with DockerSandbox(image="python:3.13-slim", working_dir="/workspace/project") as sandbox:
+    with DockerSandbox(working_dir="/workspace/project") as sandbox:
         create_mcp_server(sandbox).run(transport="streamable-http")
 
 
@@ -137,9 +137,7 @@ from deepagents import create_deep_agent
 from langchain_anthropic import ChatAnthropic
 from langchain_docker_backend import DockerSandbox
 
-sandbox = DockerSandbox()
-
-try:
+with DockerSandbox() as sandbox:
     agent = create_deep_agent(
         model=ChatAnthropic(model="claude-sonnet-4-6"),
         system_prompt="你是一个有沙箱访问权限的编程助手。",
@@ -149,8 +147,6 @@ try:
         "messages": [{"role": "user", "content": "写一个 fizzbuzz 脚本并运行"}]
     })
     print(result)
-finally:
-    sandbox.close()
 ```
 
 ### LangChain
@@ -163,9 +159,7 @@ from langchain_anthropic import ChatAnthropic
 from deepagents.middleware.filesystem import FilesystemMiddleware
 from langchain_docker_backend import DockerSandbox
 
-sandbox = DockerSandbox()
-
-try:
+with DockerSandbox() as sandbox:
     agent = create_agent(
         model=ChatAnthropic(model="claude-sonnet-4-6"),
         middleware=[FilesystemMiddleware(backend=sandbox)],
@@ -173,8 +167,6 @@ try:
     result = agent.invoke({
         "messages": [{"role": "user", "content": "写一个 fizzbuzz 脚本并运行"}]
     })
-finally:
-    sandbox.close()
 ```
 
 ### 基础用法
@@ -192,9 +184,7 @@ sandbox = DockerSandbox()                               # 默认（uv + Python 3
 ```python
 from langchain_docker_backend import DockerSandbox
 
-sandbox = DockerSandbox()
-
-try:
+with DockerSandbox() as sandbox:
     # 执行命令
     result = sandbox.execute("echo 'Hello from Docker!'")
     print(result.output)      # Hello from Docker!
@@ -223,8 +213,6 @@ try:
     # 命令超时
     result = sandbox.execute("sleep 10", timeout=2)
     print(result.exit_code)   # 124
-finally:
-    sandbox.close()
 ```
 
 ### 网络与硬件配置
@@ -284,10 +272,12 @@ with DockerSandbox(
 | 方法 | 说明 |
 |--------|------|
 | `execute(command, *, timeout)` | 执行 Shell 命令 |
-| `write(path, content)` | 写入文本文件 |
-| `read(path)` | 读取文本文件 |
+| `write(path, content)` | 创建文本文件；已存在则报错 |
+| `read(path)` | 读取文件 |
 | `ls(path)` | 列出目录内容 |
-| `edit(path, find, replace)` | 查找替换文件内容 |
+| `edit(path, old_string, new_string)` | 精确替换文件内容 |
+| `glob(pattern, path)` | 按路径模式查找文件 |
+| `grep(pattern, path, glob)` | 按字面文本检索文件内容 |
 | `upload_files(files)` | 上传二进制文件（tar 方式） |
 | `download_files(paths)` | 下载二进制文件（tar 方式） |
 | `close()` | 停止并可选删除容器 |
