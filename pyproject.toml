@@ -29,6 +29,7 @@ dependencies = [
 Repository = "https://github.com/zhengjie9510/langchain-docker-backend"
 
 [project.optional-dependencies]
+mcp = ["mcp>=2.0,<3.0"]
 dev = [
     "pytest>=8.0",
 ]

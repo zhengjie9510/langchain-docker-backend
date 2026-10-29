@@ -104,6 +104,30 @@ sandbox = DockerSandbox(
 
 ## Usage
 
+### MCP server
+
+Install the optional dependency, then configure a sandbox in your own script. The server exposes `ls`, `read`, `write`, `edit`, `glob`, `grep`, and `execute` without registering each tool yourself:
+
+```bash
+uv pip install -e '.[mcp]' --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+```python
+from langchain_docker_backend import DockerSandbox
+from langchain_docker_backend.mcp import create_mcp_server
+
+
+def main():
+    with DockerSandbox(image="python:3.13-slim", working_dir="/workspace/project") as sandbox:
+        create_mcp_server(sandbox).run(transport="streamable-http")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+The default endpoint is `http://127.0.0.1:8000/mcp`. Dify must be able to reach this address from its own runtime. One server instance shares one sandbox across all calls; add isolation before serving multiple users. `grep` matches a literal string, not a regular expression. See [`examples/mcp_server_example.py`](examples/mcp_server_example.py).
+
 ### deepagents
 
 Plug `DockerSandbox` into a deep agent — the agent gets a full set of sandbox tools and runs code in an isolated container:

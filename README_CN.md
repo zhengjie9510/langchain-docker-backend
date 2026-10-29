@@ -104,6 +104,30 @@ sandbox = DockerSandbox(
 
 ## 使用教程
 
+### 作为 MCP 服务使用
+
+安装可选依赖后，可以在自己的脚本中配置沙箱，并一次性暴露 `ls`、`read`、`write`、`edit`、`glob`、`grep` 和 `execute` 工具：
+
+```bash
+uv pip install -e '.[mcp]' --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+```
+
+```python
+from langchain_docker_backend import DockerSandbox
+from langchain_docker_backend.mcp import create_mcp_server
+
+
+def main():
+    with DockerSandbox(image="python:3.13-slim", working_dir="/workspace/project") as sandbox:
+        create_mcp_server(sandbox).run(transport="streamable-http")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+默认 MCP 地址为 `http://127.0.0.1:8000/mcp`。Dify 需要能够从其运行环境访问该地址；若运行在不同容器或主机上，需配置可达的监听地址和网络连接。一个服务实例使用一个沙箱，所有调用共享其中的文件；多用户场景需要另行做隔离。`grep` 的 `pattern` 是字面字符串，不是正则表达式。示例脚本见 [`examples/mcp_server_example.py`](examples/mcp_server_example.py)。
+
 ### deepagents
 
 将 `DockerSandbox` 接入 deep agent，agent 即获得全套沙箱工具，在隔离容器中执行代码：
