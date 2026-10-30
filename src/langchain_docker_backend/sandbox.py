@@ -9,7 +9,7 @@ Usage:
     ```python
     from langchain_docker_backend import DockerSandbox
 
-    with DockerSandbox(image="ghcr.io/astral-sh/uv:python3.13-bookworm-slim") as sandbox:
+    with DockerSandbox() as sandbox:
         result = sandbox.execute("echo 'Hello!'")
         print(result.output)
     ```
@@ -39,7 +39,7 @@ from deepagents.backends.sandbox import BaseSandbox
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_IMAGE = "ghcr.io/astral-sh/uv:python3.13-bookworm-slim"
+_DEFAULT_IMAGE = "python:3.13-slim"
 _DEFAULT_WORKING_DIR = "/workspace"
 _DEFAULT_EXECUTE_TIMEOUT = 120  # seconds
 _DEFAULT_MAX_OUTPUT_BYTES = 500 * 1024  # 500 KiB
@@ -447,7 +447,7 @@ class DockerImageNotFound(Exception):
 
     Pull the image before creating the sandbox::
 
-        docker pull ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+        docker pull python:3.13-slim
     """
 
     def __init__(self, image: str) -> None:

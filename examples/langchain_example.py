@@ -5,7 +5,7 @@ write_file, edit_file, glob, grep) and an execute tool when the backend
 implements SandboxBackendProtocol.
 
 Prerequisites:
-    docker pull ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+    docker pull python:3.13-slim
     pip install langchain-docker-backend langchain-anthropic
 
 Usage:

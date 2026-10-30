@@ -1,7 +1,7 @@
 """Run one Docker sandbox as an MCP server for HTTP clients such as Dify.
 
 Prerequisites:
-    docker pull ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+    docker pull python:3.13-slim
 
 Usage:
     python mcp_server_example.py --host 127.0.0.1 --port 8000

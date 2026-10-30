@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import docker
 import pytest
 
-TEST_IMAGE = "ghcr.io/astral-sh/uv:python3.13-bookworm-slim"
+TEST_IMAGE = "python:3.13-slim"
 
 
 # -- Package metadata --------------------------------------------------------

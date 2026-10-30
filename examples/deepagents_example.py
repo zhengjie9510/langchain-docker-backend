@@ -1,7 +1,7 @@
 """Use DockerSandbox with deepagents.
 
 Prerequisites:
-    docker pull ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+    docker pull python:3.13-slim
     pip install langchain-docker-backend langchain-anthropic
 
 Usage:

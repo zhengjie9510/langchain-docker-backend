@@ -11,10 +11,10 @@ pip install langchain-docker-backend
 **Prerequisites:** Docker must be installed and running. The default image below works out of the box — pull it before first use:
 
 ```bash
-docker pull ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+docker pull python:3.13-slim
 ```
 
-> **💡 Any Docker image works.** `ghcr.io/astral-sh/uv:python3.13-bookworm-slim` is just the default. You can use any image — `python:3.13-slim`, `ubuntu:22.04`, `node:20`, or your own custom image. Pass it via `image=` to match your runtime needs.
+> **💡 Any Docker image works.** `python:3.13-slim` is just the default. You can use any image — `ghcr.io/astral-sh/uv:python3.13-bookworm-slim`, `ubuntu:22.04`, `node:20`, or your own custom image. Pass it via `image=` to match your runtime needs.
 
 ## Connecting to Docker
 
@@ -109,7 +109,7 @@ sandbox = DockerSandbox(
 Install the optional dependency, then configure a sandbox in your own script. The server exposes `ls`, `read`, `write`, `edit`, `glob`, `grep`, and `execute` without registering each tool yourself:
 
 ```bash
-uv pip install -e '.[mcp]' --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+pip install 'langchain-docker-backend[mcp]'
 ```
 
 ```python
@@ -175,10 +175,9 @@ Beyond agent use, you can interact with the sandbox directly — execute command
 
 Pick any image to suit your stack:
 ```python
-sandbox = DockerSandbox(image="python:3.13-slim")      # bare Python
+sandbox = DockerSandbox()                               # default (Python 3.13)
 sandbox = DockerSandbox(image="node:20")                # Node.js
 sandbox = DockerSandbox(image="ubuntu:22.04")           # Ubuntu
-sandbox = DockerSandbox()                               # default (uv + Python 3.13)
 ```
 
 ```python
@@ -254,7 +253,7 @@ The exception is `upload_files` and `download_files`. These remain **developer-o
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `image` | `str` | `ghcr.io/astral-sh/uv:python3.13-bookworm-slim` | Any Docker image (public, private, or custom) |
+| `image` | `str` | `python:3.13-slim` | Any Docker image (public, private, or custom) |
 | `container_name` | `str \| None` | auto-generated | Container name |
 | `volumes` | `dict` | `{}` | Volume mounts |
 | `working_dir` | `str` | `/workspace` | Working directory inside container |

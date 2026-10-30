@@ -11,10 +11,10 @@ pip install langchain-docker-backend
 **前置条件：** 确保本机已安装并运行 Docker。以下默认镜像开箱即用，首次使用前拉取：
 
 ```bash
-docker pull ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+docker pull python:3.13-slim
 ```
 
-> **💡 任意 Docker 镜像均可使用。** `ghcr.io/astral-sh/uv:python3.13-bookworm-slim` 只是默认值。你可以用任何镜像 —— `python:3.13-slim`、`ubuntu:22.04`、`node:20`，或者你自己的定制镜像。通过 `image=` 参数传入即可，自由匹配你的运行时需求。
+> **💡 任意 Docker 镜像均可使用。** `python:3.13-slim` 只是默认值。你可以用任何镜像 —— `ghcr.io/astral-sh/uv:python3.13-bookworm-slim`、`ubuntu:22.04`、`node:20`，或者你自己的定制镜像。通过 `image=` 参数传入即可，自由匹配你的运行时需求。
 
 ## Docker 连接方式
 
@@ -109,7 +109,7 @@ sandbox = DockerSandbox(
 安装可选依赖后，可以在自己的脚本中配置沙箱，并一次性暴露 `ls`、`read`、`write`、`edit`、`glob`、`grep` 和 `execute` 工具：
 
 ```bash
-uv pip install -e '.[mcp]' --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+pip install 'langchain-docker-backend[mcp]'
 ```
 
 ```python
@@ -175,10 +175,9 @@ with DockerSandbox() as sandbox:
 
 自由选择镜像以匹配你的技术栈：
 ```python
-sandbox = DockerSandbox(image="python:3.13-slim")      # 纯净 Python
+sandbox = DockerSandbox()                               # 默认（Python 3.13）
 sandbox = DockerSandbox(image="node:20")                # Node.js
 sandbox = DockerSandbox(image="ubuntu:22.04")           # Ubuntu
-sandbox = DockerSandbox()                               # 默认（uv + Python 3.13）
 ```
 
 ```python
@@ -254,7 +253,7 @@ with DockerSandbox(
 
 | 参数 | 类型 | 默认值 | 说明 |
 |-----------|------|---------|------|
-| `image` | `str` | `ghcr.io/astral-sh/uv:python3.13-bookworm-slim` | 任意 Docker 镜像（公开、私有或定制） |
+| `image` | `str` | `python:3.13-slim` | 任意 Docker 镜像（公开、私有或定制） |
 | `container_name` | `str \| None` | 自动生成 | 容器名称 |
 | `volumes` | `dict` | `{}` | 目录挂载 |
 | `working_dir` | `str` | `/workspace` | 容器内工作目录 |
