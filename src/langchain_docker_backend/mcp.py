@@ -32,7 +32,7 @@ def create_mcp_server(sandbox: DockerSandbox) -> MCPServer:
         path: Annotated[str, Field(description="Path for the new file.")],
         content: Annotated[str, Field(description="UTF-8 text to write.")],
     ) -> dict:
-        """Create a text file. Returns an error if the file already exists."""
+        """Create or overwrite a text file."""
         return asdict(sandbox.write(path, content))
 
     @server.tool()

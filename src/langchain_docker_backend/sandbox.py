@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import io
 import logging
+import posixpath
+import shlex
 import tarfile
 import threading
 import uuid
@@ -31,6 +33,7 @@ from deepagents.backends.protocol import (
     ExecuteResponse,
     FileDownloadResponse,
     FileUploadResponse,
+    GlobResult,
 )
 from deepagents.backends.sandbox import BaseSandbox
 
@@ -130,7 +133,7 @@ class DockerSandbox(BaseSandbox):
         self._check_image()
 
         self._container = self._create_container()
-        self.execute(f"mkdir -p {working_dir}")
+        self.execute(f"mkdir -p {shlex.quote(working_dir)}")
 
         logger.info(
             "DockerSandbox initialized: container=%s, image=%s, network_mode=%s",
@@ -210,6 +213,25 @@ class DockerSandbox(BaseSandbox):
     def _create_container(self) -> Container:
         """Create and start the container."""
         return self._client.containers.run(**self._build_run_kwargs())
+
+    def _resolve_path(self, file_path: str) -> str:
+        """Resolve a file path relative to the sandbox working directory."""
+        if file_path.startswith("/"):
+            return file_path
+        return f"{self._working_dir}/{file_path}"
+
+    def glob(self, pattern: str, path: str | None = None) -> GlobResult:
+        """Find files by pattern.
+
+        Relative roots are resolved against the working directory, matching
+        every other file operation.  ``BaseSandbox.glob`` would otherwise treat
+        them as relative to the container root.
+        """
+        if path is None:
+            path = self._working_dir
+        elif not path.startswith("/"):
+            path = self._resolve_path(path)
+        return super().glob(pattern, path=posixpath.normpath(path))
 
     @property
     def id(self) -> str:
@@ -309,8 +331,7 @@ class DockerSandbox(BaseSandbox):
 
         for file_path, content in files:
             try:
-                if not file_path.startswith("/"):
-                    file_path = f"{self._working_dir}/{file_path}"
+                file_path = self._resolve_path(file_path)
 
                 dir_path = file_path.rsplit("/", 1)[0] if "/" in file_path else "/"
 
@@ -323,7 +344,7 @@ class DockerSandbox(BaseSandbox):
 
                 tar_stream.seek(0)
 
-                self.execute(f"mkdir -p {dir_path}")
+                self.execute(f"mkdir -p {shlex.quote(dir_path)}")
                 self._container.put_archive("/", tar_stream)
 
                 responses.append(FileUploadResponse(path=file_path, error=None))
@@ -349,8 +370,7 @@ class DockerSandbox(BaseSandbox):
 
         for file_path in paths:
             try:
-                if not file_path.startswith("/"):
-                    file_path = f"{self._working_dir}/{file_path}"
+                file_path = self._resolve_path(file_path)
 
                 tar_stream, _stat = self._container.get_archive(file_path)
 
@@ -361,17 +381,7 @@ class DockerSandbox(BaseSandbox):
 
                 with tarfile.open(fileobj=tar_data, mode="r") as tar:
                     members = tar.getmembers()
-                    if not members:
-                        responses.append(
-                            FileDownloadResponse(
-                                path=file_path,
-                                content=None,
-                                error="file_not_found",
-                            )
-                        )
-                        continue
-
-                    f = tar.extractfile(members[0])
+                    f = tar.extractfile(members[0]) if members else None
                     if f is None:
                         responses.append(
                             FileDownloadResponse(
