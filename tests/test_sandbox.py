@@ -5,6 +5,8 @@ from unittest.mock import MagicMock
 import docker
 import pytest
 
+TEST_IMAGE = "python:3.13-slim"
+
 
 # -- Package metadata --------------------------------------------------------
 
@@ -56,6 +58,48 @@ def mock_client(monkeypatch):
 
 def _run_kwargs(client):
     return client.containers.run.call_args.kwargs
+
+
+@pytest.mark.parametrize(
+    ("working_dir", "file_path", "expected"),
+    [
+        ("/workspace", "file.txt", "/workspace/file.txt"),
+        ("/workspace", "/tmp/file.txt", "/tmp/file.txt"),
+        ("/custom/workdir", "nested/file.txt", "/custom/workdir/nested/file.txt"),
+    ],
+)
+def test_resolve_path_without_docker(working_dir, file_path, expected):
+    """Paths are resolved without initializing a Docker client."""
+    from langchain_docker_backend import DockerSandbox
+
+    sandbox = DockerSandbox.__new__(DockerSandbox)
+    sandbox._working_dir = working_dir
+
+    assert sandbox._resolve_path(file_path) == expected
+
+
+def test_working_dir_is_shell_quoted(mock_client):
+    """The internal mkdir command safely quotes the working directory."""
+    from langchain_docker_backend import DockerSandbox
+
+    DockerSandbox(working_dir="/workspace with spaces/$(echo unsafe)")
+
+    command = mock_client.containers.run.return_value.exec_run.call_args.kwargs["cmd"]
+    assert command == ["sh", "-c", "mkdir -p '/workspace with spaces/$(echo unsafe)'"]
+
+
+def test_upload_directory_is_shell_quoted(mock_client):
+    """upload_files safely quotes the destination directory."""
+    from langchain_docker_backend import DockerSandbox
+
+    sandbox = DockerSandbox()
+    sandbox.execute = MagicMock()
+
+    sandbox.upload_files([("folder with spaces/$(echo unsafe)/file.txt", b"data")])
+
+    sandbox.execute.assert_called_once_with(
+        "mkdir -p '/workspace/folder with spaces/$(echo unsafe)'"
+    )
 
 
 def test_default_run_kwargs_unchanged(mock_client):
@@ -147,7 +191,7 @@ class TestDockerSandboxIntegration:
         """Execute, write, read, ls, edit, and timeout in one container."""
         from langchain_docker_backend import DockerSandbox
 
-        with DockerSandbox(image="ghcr.io/astral-sh/uv:python3.13-bookworm-slim") as sandbox:
+        with DockerSandbox(image=TEST_IMAGE) as sandbox:
             # 1. Basic command execution
             result = sandbox.execute("echo 'Hello from Docker!'")
             assert result.exit_code == 0
@@ -190,7 +234,7 @@ class TestDockerSandboxIntegration:
         """upload_files writes bytes, download_files reads them back."""
         from langchain_docker_backend import DockerSandbox
 
-        with DockerSandbox(image="ghcr.io/astral-sh/uv:python3.13-bookworm-slim") as sandbox:
+        with DockerSandbox(image=TEST_IMAGE) as sandbox:
             # Upload multiple files
             files = [
                 ("/workspace/a.txt", b"alpha"),
@@ -212,7 +256,7 @@ class TestDockerSandboxIntegration:
         """download_files returns error for missing files."""
         from langchain_docker_backend import DockerSandbox
 
-        with DockerSandbox(image="ghcr.io/astral-sh/uv:python3.13-bookworm-slim") as sandbox:
+        with DockerSandbox(image=TEST_IMAGE) as sandbox:
             results = sandbox.download_files(["/workspace/nope.txt"])
             assert len(results) == 1
             assert results[0].content is None
@@ -223,7 +267,7 @@ class TestDockerSandboxIntegration:
         from langchain_docker_backend import DockerSandbox
 
         with DockerSandbox(
-            image="ghcr.io/astral-sh/uv:python3.13-bookworm-slim",
+            image=TEST_IMAGE,
             network_mode="none",
         ) as sandbox:
             result = sandbox.execute("ls /sys/class/net")
@@ -235,7 +279,7 @@ class TestDockerSandboxIntegration:
         from langchain_docker_backend import DockerSandbox
 
         with DockerSandbox(
-            image="ghcr.io/astral-sh/uv:python3.13-bookworm-slim",
+            image=TEST_IMAGE,
             dns=["1.1.1.1"],
         ) as sandbox:
             result = sandbox.execute("cat /etc/resolv.conf")
@@ -246,7 +290,7 @@ class TestDockerSandboxIntegration:
         from langchain_docker_backend import DockerSandbox
 
         with DockerSandbox(
-            image="ghcr.io/astral-sh/uv:python3.13-bookworm-slim",
+            image=TEST_IMAGE,
             container_kwargs={"mem_limit": "256m"},
         ) as sandbox:
             sandbox._container.reload()

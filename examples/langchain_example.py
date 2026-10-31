@@ -5,7 +5,7 @@ write_file, edit_file, glob, grep) and an execute tool when the backend
 implements SandboxBackendProtocol.
 
 Prerequisites:
-    docker pull ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+    docker pull python:3.13-slim
     pip install langchain-docker-backend langchain-anthropic
 
 Usage:
@@ -20,29 +20,30 @@ from deepagents.middleware.filesystem import FilesystemMiddleware
 
 from langchain_docker_backend import DockerSandbox
 
-sandbox = DockerSandbox()
+def main() -> None:
+    with DockerSandbox() as sandbox:
+        agent = create_agent(
+            model=ChatAnthropic(
+                model="mimo-v2.5-pro",
+                base_url=os.environ.get("ANTHROPIC_BASE_URL"),
+                api_key=os.environ.get("ANTHROPIC_AUTH_TOKEN"),
+            ),
+            system_prompt="You are a Python coding assistant with sandbox access.",
+            middleware=[FilesystemMiddleware(backend=sandbox)],
+        )
 
-agent = create_agent(
-    model=ChatAnthropic(
-        model="mimo-v2.5-pro",
-        base_url=os.environ.get("ANTHROPIC_BASE_URL"),
-        api_key=os.environ.get("ANTHROPIC_AUTH_TOKEN"),
-    ),
-    system_prompt="You are a Python coding assistant with sandbox access.",
-    middleware=[FilesystemMiddleware(backend=sandbox)],
-)
+        result = agent.invoke(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Write a Python fizzbuzz script and run it",
+                    }
+                ]
+            }
+        )
+        print(result)
 
-try:
-    result = agent.invoke(
-        {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "Write a Python fizzbuzz script and run it",
-                }
-            ]
-        }
-    )
-    print(result)
-finally:
-    sandbox.close()
+
+if __name__ == "__main__":
+    main()

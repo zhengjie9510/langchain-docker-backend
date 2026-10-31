@@ -4,7 +4,7 @@ Usage:
     ```python
     from langchain_docker_backend import DockerSandbox
 
-    with DockerSandbox(image="ghcr.io/astral-sh/uv:python3.13-bookworm-slim") as sandbox:
+    with DockerSandbox() as sandbox:
         result = sandbox.execute("echo 'Hello!'")
         print(result.output)
     ```
