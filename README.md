@@ -1,124 +1,55 @@
 # langchain-docker-backend
 
-Docker sandbox backend for AI agents — execute code safely in isolated containers.
+[English](README.md) | [简体中文](README_CN.md)
+
+A lightweight Docker sandbox for AI agents. Use it as a **LangChain / Deep Agents backend**, interact with it directly in Python, or expose sandbox tools through an **optional MCP server**.
+
+Run commands and work with files inside Docker containers, using your preferred image and local or remote Docker daemon.
 
 ## Installation
+
+Install the Docker sandbox backend:
 
 ```bash
 pip install langchain-docker-backend
 ```
 
-**Prerequisites:** Docker must be installed and running. The default image below works out of the box — pull it before first use:
+To also run an MCP server, install the optional extra:
+
+```bash
+pip install 'langchain-docker-backend[mcp]'
+```
+
+**Prerequisites:** Docker must be installed and running. Pull the default image before first use:
 
 ```bash
 docker pull python:3.13-slim
 ```
 
-> **💡 Any Docker image works.** `python:3.13-slim` is just the default. You can use any image — `ghcr.io/astral-sh/uv:python3.13-bookworm-slim`, `ubuntu:22.04`, `node:20`, or your own custom image. Pass it via `image=` to match your runtime needs.
-
-## Connecting to Docker
-
-`DockerSandbox` connects to Docker via `docker.from_env()`. By default it reads the `DOCKER_HOST` environment variable, falling back to the local Unix socket (`/var/run/docker.sock`).
-
-### Local Docker (default)
-
-The most common setup — your code runs on the host and connects to the local Docker daemon. No extra configuration needed:
-
-```python
-sandbox = DockerSandbox()  # connects to /var/run/docker.sock
-```
-
-### Docker-in-Docker
-
-When running the library itself inside a container, there are two approaches:
-
-**Approach 1 — Socket mount (Docker outside of Docker)**
-
-Mount the host's Docker socket into the container. The container shares the host's Docker daemon — simpler and more lightweight:
-
-```bash
-docker run -v /var/run/docker.sock:/var/run/docker.sock your-image
-```
-
-```python
-# Inside the container — works the same way
-sandbox = DockerSandbox()
-```
-
-> **Note:** This gives the container access to the host's Docker daemon. Make sure the security implications are acceptable for your use case.
-
-**Approach 2 — True Docker-in-Docker (DinD)**
-
-Run a full Docker daemon inside the container using the `docker:dind` image. Completely isolated from the host's Docker, but requires `--privileged`:
-
-```bash
-docker run --privileged docker:dind
-```
-
-```python
-# Inside the DinD container — point to the inner daemon
-sandbox = DockerSandbox(
-    docker_client_kwargs={"base_url": "unix:///var/run/docker.sock"}
-)
-```
-
-> **Note:** `--privileged` grants the container extended Linux capabilities. Prefer the socket mount approach unless you need full isolation between the inner and outer Docker daemons.
-
-### Remote Docker
-
-Connect to a Docker daemon on another machine via TCP.
-
-**Option 1: Environment variable** (recommended)
-
-```bash
-export DOCKER_HOST=tcp://192.168.1.100:2375
-```
-
-```python
-sandbox = DockerSandbox()  # reads DOCKER_HOST automatically
-```
-
-**Option 2: Explicit `docker_client_kwargs`**
-
-```python
-sandbox = DockerSandbox(
-    docker_client_kwargs={"base_url": "tcp://192.168.1.100:2375"}
-)
-```
-
-**With TLS:**
-
-```python
-import docker.tls
-
-sandbox = DockerSandbox(
-    docker_client_kwargs={
-        "base_url": "tcp://192.168.1.100:2376",
-        "tls": docker.tls.TLSConfig(
-            ca_cert="/path/to/ca.pem",
-            client_cert=("/path/to/cert.pem", "/path/to/key.pem"),
-        ),
-    }
-)
-```
+`python:3.13-slim` is only the default. You can choose any suitable Docker image with `image=`, including a private or custom image.
 
 ## Usage
 
+Choose the integration that fits your application:
+
+- [MCP server](#mcp-server) — make sandbox operations available to MCP clients.
+- [Deep Agents](#deep-agents) — use Docker as an agent backend.
+- [LangChain](#langchain) — use the sandbox with `FilesystemMiddleware`.
+- [Direct Python usage](#direct-python-usage) — call sandbox methods yourself.
+
 ### MCP server
 
-Install the optional dependency, then configure a sandbox in your own script. The server exposes `ls`, `read`, `write`, `edit`, `glob`, `grep`, and `execute` without registering each tool yourself:
+The optional MCP adapter exposes seven tools backed by a `DockerSandbox`: `ls`, `read`, `write`, `edit`, `glob`, `grep`, and `execute`.
 
-```bash
-pip install 'langchain-docker-backend[mcp]'
-```
+After installing the `[mcp]` extra, save the following as `mcp_server.py`:
 
 ```python
 from langchain_docker_backend import DockerSandbox
 from langchain_docker_backend.mcp import create_mcp_server
 
 
-def main():
-    with DockerSandbox(working_dir="/workspace/project") as sandbox:
+def main() -> None:
+    with DockerSandbox() as sandbox:
         create_mcp_server(sandbox).run(transport="streamable-http")
 
 
@@ -126,11 +57,35 @@ if __name__ == "__main__":
     main()
 ```
 
-The default endpoint is `http://127.0.0.1:8000/mcp`. Dify must be able to reach this address from its own runtime. One server instance shares one sandbox across all calls; add isolation before serving multiple users. `grep` matches a literal string, not a regular expression. See [`examples/mcp_server_example.py`](examples/mcp_server_example.py).
+Start it with:
 
-### deepagents
+```bash
+python mcp_server.py
+```
 
-Plug `DockerSandbox` into a deep agent — the agent gets a full set of sandbox tools and runs code in an isolated container:
+The default MCP endpoint is **`http://127.0.0.1:8000/mcp`**. Connect to it using an MCP client that supports Streamable HTTP. For example, Dify can use this endpoint if it is reachable from the Dify runtime. If the client runs on a different host or in another container, `127.0.0.1` will not refer to your MCP server; configure a reachable server address and the appropriate network access.
+
+For configurable host and port options, see [`examples/mcp_server_example.py`](examples/mcp_server_example.py).
+
+| MCP tool | What it does |
+|---|---|
+| `ls` | List files and directories |
+| `read` | Read file contents (including paginated text) |
+| `write` | Create or overwrite a text file |
+| `edit` | Replace exact text in a file |
+| `glob` | Find files by path pattern |
+| `grep` | Search for literal text (not regular expressions) |
+| `execute` | Run a shell command in the container |
+
+**Access and isolation:** MCP clients can execute commands and modify files inside the sandbox. Do not expose this server to untrusted users without access controls. One server instance uses **one shared sandbox** across its clients; deploy separate instances or add isolation for multi-user workloads.
+
+### Deep Agents
+
+Use `DockerSandbox` as a backend for a Deep Agents agent. The example below uses Anthropic; install the corresponding model integration and configure its credentials first (or replace it with your model provider):
+
+```bash
+pip install langchain-anthropic
+```
 
 ```python
 from deepagents import create_deep_agent
@@ -151,7 +106,7 @@ with DockerSandbox() as sandbox:
 
 ### LangChain
 
-With LangChain, wire it through `FilesystemMiddleware`:
+Use `FilesystemMiddleware` to make sandbox operations available to a LangChain agent (using the same model-provider setup as above):
 
 ```python
 from langchain.agents import create_agent
@@ -165,126 +120,163 @@ with DockerSandbox() as sandbox:
         middleware=[FilesystemMiddleware(backend=sandbox)],
     )
     result = agent.invoke({
-        "messages": [{"role": "user", "content": "Write a fizzbuzz script and run it"}]
+        "messages": [{"role": "user", "content": "Write and run a fizzbuzz script"}]
     })
+    print(result)
 ```
 
-### Direct Usage
+### Direct Python usage
 
-Beyond agent use, you can interact with the sandbox directly — execute commands, read and write files, list directories, edit file content.
-
-Pick any image to suit your stack:
-```python
-sandbox = DockerSandbox()                               # default (Python 3.13)
-sandbox = DockerSandbox(image="node:20")                # Node.js
-sandbox = DockerSandbox(image="ubuntu:22.04")           # Ubuntu
-```
+Use sandbox operations without an agent:
 
 ```python
 from langchain_docker_backend import DockerSandbox
 
-with DockerSandbox() as sandbox:
-    # Execute commands
-    result = sandbox.execute("echo 'Hello from Docker!'")
-    print(result.output)      # Hello from Docker!
-    print(result.exit_code)   # 0
+with DockerSandbox(image="python:3.13-slim") as sandbox:
+    result = sandbox.execute("python --version")
+    print(result.output, result.exit_code)
 
-    # Write a file
-    sandbox.write("/workspace/test.txt", "Hello, World!")
+    sandbox.write("/workspace/hello.txt", "Hello from Docker!\n")
+    file = sandbox.read("/workspace/hello.txt")
+    print(file.file_data["content"])
 
-    # Read it back
-    file = sandbox.read("/workspace/test.txt")
-    print(file.file_data["content"])  # Hello, World!
+    for item in sandbox.ls("/workspace").entries:
+        print(item["path"])
 
-    # List a directory
-    ls = sandbox.ls("/workspace")
-    for entry in ls.entries:
-        print(entry["path"], entry.get("is_dir", False))
-
-    # Find and replace
-    sandbox.edit("/workspace/test.txt", "Hello", "你好")
-
-    # Upload / download binary files
+    sandbox.edit("/workspace/hello.txt", "Hello", "Hi")
     sandbox.upload_files([("data.bin", b"\x00\x01\x02")])
-    files = sandbox.download_files(["data.bin"])
-    print(files[0].content)  # b'\x00\x01\x02'
-
-    # Commands time out
-    result = sandbox.execute("sleep 10", timeout=2)
-    print(result.exit_code)   # 124
+    downloaded = sandbox.download_files(["data.bin"])
+    print(downloaded[0].content)
 ```
 
-### Network & Hardware Configuration
+The default container is removed on `close()` or when leaving the `with` block. You can override this with `auto_remove=False` (the container is still stopped on close).
 
-Network, DNS, GPU and resource settings are applied when the container is created:
+## Connecting to Docker
+
+`DockerSandbox` connects using `docker.from_env()`. It honors standard Docker environment settings such as `DOCKER_HOST`, and can also accept explicit Docker client options through `docker_client_kwargs`.
+
+### Local Docker
+
+With a local Docker daemon, no special connection configuration is needed:
+
+```python
+sandbox = DockerSandbox()
+```
+
+On typical Linux systems the default connection uses `/var/run/docker.sock`; Docker Desktop and other platforms may use different endpoints.
+
+### Running the application inside a container
+
+You can mount the host's Docker socket into the application container:
+
+```bash
+docker run -v /var/run/docker.sock:/var/run/docker.sock your-image
+```
+
+`DockerSandbox()` can then talk to that daemon from inside the application container. **Mounting the Docker socket grants powerful access to the host Docker daemon**; only do this in a trusted environment.
+
+Alternatively, run a separate Docker daemon with Docker-in-Docker (DinD), which typically requires privileged mode. For example, with the appropriate daemon already running and accessible:
+
+```python
+sandbox = DockerSandbox(
+    docker_client_kwargs={"base_url": "unix:///var/run/docker.sock"}
+)
+```
+
+### Remote Docker
+
+For a remote Docker daemon secured with TLS, configure the standard Docker environment variables:
+
+```bash
+export DOCKER_HOST=tcp://your-docker-host:2376
+export DOCKER_TLS_VERIFY=1
+export DOCKER_CERT_PATH=/path/to/docker-certs
+```
+
+The certificate directory should contain the Docker client certificates (`ca.pem`, `cert.pem`, and `key.pem`). `DockerSandbox()` then uses these settings through `docker.from_env()`.
+
+Alternatively, configure the Docker client explicitly:
+
+```python
+import docker.tls
+from langchain_docker_backend import DockerSandbox
+
+sandbox = DockerSandbox(
+    docker_client_kwargs={
+        "base_url": "tcp://your-docker-host:2376",
+        "tls": docker.tls.TLSConfig(
+            ca_cert="/path/to/ca.pem",
+            client_cert=("/path/to/cert.pem", "/path/to/key.pem"),
+            verify=True,
+        ),
+    }
+)
+```
+
+Do **not** expose an unauthenticated Docker TCP API to untrusted networks.
+
+## Network and resource configuration
+
+You can choose container networking, DNS, GPUs, and other Docker container options:
 
 ```python
 from langchain_docker_backend import DockerSandbox
 
 with DockerSandbox(
-    network_mode="host",          # "bridge" (Docker default), "host", "none", "container:<id>"
-    dns=["1.1.1.1", "8.8.8.8"],   # custom DNS servers
-    gpus="all",                   # "all" or a number of GPUs
-    container_kwargs={            # any other docker-py containers.run() option
+    network_mode="bridge",     # also "host", "none", "container:<id>"
+    dns=["1.1.1.1"],
+    # gpus="all",              # optional; requires NVIDIA Container Toolkit
+    container_kwargs={
         "mem_limit": "4g",
-        "nano_cpus": 2_000_000_000,               # 2 CPUs
+        "nano_cpus": 2_000_000_000,
         "shm_size": "2g",
-        "devices": ["/dev/accel0:/dev/accel0"],   # pass through host devices
     },
 ) as sandbox:
-    sandbox.execute("pip install requests")
+    print(sandbox.execute("python --version").output)
 ```
 
-- **No internet inside the sandbox?** Containers on Docker's default `bridge` network already have outbound access. If package installs or web requests fail, DNS is the usual cause (e.g. a host using `127.0.0.53` and a network that blocks Docker's `8.8.8.8` fallback) — set `dns=[...]` to resolvers reachable from your network before reaching for `network_mode="host"`.
-- **GPUs** require the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) on the host. Other accelerators (NPUs, TPUs, ...) can be exposed via `container_kwargs={"devices": [...]}` or `{"device_requests": [...]}`.
-- **Isolation:** `network_mode="host"`, host `devices` and `container_kwargs={"privileged": True}` weaken the sandbox boundary. Use `network_mode="none"` for fully offline agents.
+- **Network:** Docker's default `bridge` network generally permits outbound connections; use `network_mode="none"` for a container without network access. If network requests fail, check DNS and firewall settings.
+- **GPU:** NVIDIA GPU access requires host-side NVIDIA Container Toolkit configuration. Other devices can be passed through via Docker container options when supported.
+- **Isolation:** Host networking, device mounts, `privileged=True`, and Docker socket access can reduce isolation. Choose settings according to your threat model.
 
 ## Design
 
-`DockerSandbox` implements `BaseSandbox`, which defines a full set of sandbox operations — synchronous and asynchronous — including `execute`, file reads and writes, directory listing, glob, grep, and more.
+`DockerSandbox` implements Deep Agents' `BaseSandbox` interface, providing command execution and file operations, including synchronous and asynchronous methods. When used with Deep Agents or `FilesystemMiddleware`, agent-facing file and execution operations can be exposed as tools.
 
-When plugged into `FilesystemMiddleware` or `create_deep_agent(backend=...)`, most operations are exposed as tools that the **agent model decides** when to invoke: the model autonomously chooses to `ls` a directory, `read_file`, `write_file`, `execute` a command, etc.
+`upload_files()` and `download_files()` are intended for explicit application-side use rather than being exposed as agent tools by this package. The MCP adapter separately exposes the seven tools listed above; it does not expose binary upload/download tools.
 
-The exception is `upload_files` and `download_files`. These remain **developer-only** — the developer controls what data enters the sandbox and what results to extract, not the model.
+## API reference
 
-## API Reference
+### `DockerSandbox` options
 
-### `DockerSandbox`
+| Parameter | Default | Description |
+|---|---|---|
+| `image` | `python:3.13-slim` | Docker image to run |
+| `container_name` | Generated | Container name |
+| `volumes` | `{}` | Host-to-container volume mounts |
+| `working_dir` | `/workspace` | Working directory inside the container |
+| `auto_remove` | `True` | Remove the container when closing (it is stopped either way) |
+| `execute_timeout` | `120` | Default command timeout in seconds |
+| `max_output_bytes` | `512000` | Maximum command output bytes before truncation |
+| `docker_client_kwargs` | `None` | Options passed to `docker.from_env()` |
+| `network_mode` | `None` | Docker network mode (Docker default when omitted) |
+| `dns` | `None` | Custom DNS servers |
+| `gpus` | `None` | `"all"` or a positive GPU count |
+| `container_kwargs` | `None` | Additional `containers.run()` options |
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `image` | `str` | `python:3.13-slim` | Any Docker image (public, private, or custom) |
-| `container_name` | `str \| None` | auto-generated | Container name |
-| `volumes` | `dict` | `{}` | Volume mounts |
-| `working_dir` | `str` | `/workspace` | Working directory inside container |
-| `auto_remove` | `bool` | `True` | Remove container on close |
-| `execute_timeout` | `int` | `120` | Default timeout in seconds |
-| `max_output_bytes` | `int` | `512000` | Max output bytes before truncation |
-| `docker_client_kwargs` | `dict \| None` | `None` | Extra keyword arguments for `docker.from_env()` (e.g. `base_url`, `tls`) |
-| `network_mode` | `str \| None` | `None` (Docker default `bridge`) | Container network mode: `"bridge"`, `"host"`, `"none"`, `"container:<id>"` |
-| `dns` | `list[str] \| None` | `None` | Custom DNS servers |
-| `gpus` | `int \| str \| None` | `None` | GPUs to expose: `"all"` or a positive count (needs NVIDIA Container Toolkit) |
-| `container_kwargs` | `dict \| None` | `None` | Extra keyword arguments for `client.containers.run()` (e.g. `mem_limit`, `nano_cpus`, `devices`, `shm_size`) |
-
-### Key Methods
+### Main methods
 
 | Method | Description |
-|--------|-------------|
-| `execute(command, *, timeout)` | Run a shell command |
-| `write(path, content)` | Create a text file; fail if it exists |
+|---|---|
+| `execute(command, *, timeout=None)` | Execute a command; returns an `ExecuteResponse` |
+| `write(path, content)` | Create or overwrite a text file |
 | `read(path)` | Read a file |
-| `ls(path)` | List directory contents |
-| `edit(path, old_string, new_string)` | Replace exact text in a file |
-| `glob(pattern, path)` | Find files by path pattern |
-| `grep(pattern, path, glob)` | Search file contents for literal text |
-| `upload_files(files)` | Upload binary files (tar-based) |
-| `download_files(paths)` | Download binary files (tar-based) |
-| `close()` | Stop and optionally remove container |
+| `ls(path)` | List a directory |
+| `edit(path, old_string, new_string, replace_all=False)` | Replace text |
+| `glob(pattern, path=None)` | Find files by path pattern |
+| `grep(pattern, path=None, glob=None)` | Search for literal text |
+| `upload_files(files)` | Upload binary files as `(path, bytes)` pairs |
+| `download_files(paths)` | Download files by path |
+| `close()` | Stop the container, optionally remove it, and close the Docker client |
 
-### `ExecuteResponse`
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `output` | `str` | Combined stdout + stderr |
-| `exit_code` | `int` | Command exit code |
-| `truncated` | `bool` | Whether output was truncated |
+`ExecuteResponse` includes `output` (combined stdout/stderr), `exit_code`, and `truncated` (whether the output was shortened).
